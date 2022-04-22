@@ -14,3 +14,13 @@
 1. Simulate 7 features and generate remaining 13 features (continue)
 1. Pre-process Collected Data
 1. Design Data 
+## Meeting 4/4
+1. Project Demonstration Wed 4/27 12:30 pm - 2:30 pm
+
+## Meeting 4/4
+1. Project Demonstration Wed 4/27 12:30 pm - 2:30 pm
+
+## Meeting 4/11
+1. Presentation Board
+ * Fri 4/22
+ * **Hard Deadline:** Mon 4/25
