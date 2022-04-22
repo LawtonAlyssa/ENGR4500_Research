@@ -2,7 +2,9 @@ from ctypes import sizeof
 import traceback
 import pandas as pd
 import numpy as np
-import datetime as dt
+from datetime import datetime
+from time import sleep
+from tqdm import tqdm
 import random
 import warnings
 from sklearn.metrics import accuracy_score
@@ -58,37 +60,21 @@ def getSampleData(data_df):
     # n = 12500
     # training: 10000
     # testing: 2500
-    return data_df.sample(n=200, random_state=random.randint(a=0, b=2e9))
+    return data_df.sample(n=62500, random_state=random.randint(a=0, b=2e9))
 
 def main():
     final_results_df = pd.DataFrame(columns=['model_type', 'model', 'accuracy', 'class_gen_model', 'reg_gen_model'])
-    for _ in range(1):
+    current_date_time = datetime.now().strftime('%Y%m%d-%H%M%S')
+    for _ in tqdm(range(1000)):
         sim_results_df = simulation_instance()
+        # reorder columns
         final_results_df = pd.concat([final_results_df, sim_results_df], axis=0)
+        final_results_df = final_results_df[['class_gen_model', 'reg_gen_model', 'model', 'accuracy']].convert_dtypes()
+        final_results_df.to_csv('results/results_{}.csv'.format(current_date_time))      
+    final_results_df = final_results_df.groupby(['model', 'class_gen_model', 'reg_gen_model'])['accuracy'].mean()
+    final_results_df.to_csv('results/results_{}.csv'.format(current_date_time))      
     print()
-    # reorder columns
-    final_results_df = final_results_df[['class_gen_model', 'reg_gen_model', 'model', 'accuracy']]
-    # final_results_df = pd.DataFrame(final_results_df['accuracy'].convert_dtypes()).groupby(level=0).mean()
-    # arrays = [final_results_df['model_type'].to_list(), final_results_df['model'].to_list(), final_results_df['class_gen_model'].to_list(), final_results_df['reg_gen_model'].to_list()]
-    # print(arrays)
-    # index = pd.MultiIndex.from_arrays(arrays, names=('model_type', 'model', 'class_gen_model', 'reg_gen_model'))
-    # final_results_df.rename(index=index, inplace=True)
     print(final_results_df)
-    
-    # ---group by--
-    # final_results_df = final_results_df[['model_type', 'model', 'class_gen_model', 'reg_gen_model', 'accuracy']]
-    # print(final_results_df.head())
-    # final_results_df = pd.DataFrame(final_results_df.groupby(['model_type', 'model', 'class_gen_model', 'reg_gen_model'])['accuracy'])
-    # print()
-    # print(final_results_df.head())
-    # final_results_df.astype({'accuracy':'float64'})
-    # print(final_results_df['accuracy'].mean()) # ['accuracy'].mean())
-    
-    # final_results_df.convert_dtypes()
-    # print(final_results_df.describe())
-    # print(pd.DataFrame(final_results_df))
-
-    # results_df.to_csv('/results/results_{}.csv'.format(dt.datetime.now().strftime('%Y%m%d-%H%M%S')))      
     
 def modelFit(model, X, y):  
     try:
@@ -126,7 +112,7 @@ def fitClassificationFeatures(X, y):
         modelFit(model, X, y) 
         models.append(model)
         y = y_temp
-    print("Finished edge features classification model fitting...")
+    # print("Finished edge features classification model fitting...")
     return models, y_dfs # fitted classfication models of edge features
 
 def predictClassificationFeatures(models, X, y, discrete_cols, results_cols):
@@ -139,7 +125,7 @@ def predictClassificationFeatures(models, X, y, discrete_cols, results_cols):
     model_names = ['svm', 'random_forest', 'ann']
     for i in range(len(model_names)):
         model_name = model_names[i]
-        print("Predicting", model_name, "...")
+        # print("Predicting", model_name, "...")
         model = models[i]
         # print(model) 
         y_cols = pd.get_dummies(y, columns=y.columns, prefix=y.columns).columns \
@@ -176,8 +162,8 @@ def predictClassificationFeatures(models, X, y, discrete_cols, results_cols):
           
     results_df.reset_index(drop=True, inplace=True)
     results_df.columns = results_cols
-    print("gen_class_cols_results_df:")  
-    print(results_df)
+    # print("gen_class_cols_results_df:")  
+    # print(results_df)
     
     return gen_cols
 
@@ -193,7 +179,7 @@ def fitRegressionFeatures(X, y):
         y_dfs.append(y)
         modelFit(model, X, y) 
         models.append(model)
-    print("Finished edge features regression model fitting...")
+    # print("Finished edge features regression model fitting...")
     return models # fitted regression models of edge features
 
 def predictRegressionFeatures(models, X, y, results_cols):
@@ -214,8 +200,8 @@ def predictRegressionFeatures(models, X, y, results_cols):
         gen_cols.append(heart_gen_prime_df)
     results_df.reset_index(drop=True, inplace=True)
     results_df.columns = results_cols
-    print("gen_reg_cols_results_df:")  
-    print(results_df)
+    # print("gen_reg_cols_results_df:")  
+    # print(results_df)
     
     return gen_cols
     
@@ -229,7 +215,7 @@ def fitAllFeatures(X, y):
         model = getClassificationModelType(model)
         modelFit(model, X, y) 
         models.append(model)
-    print("Finished all features classification model fitting...")
+    # print("Finished all features classification model fitting...")
     return models # fitted classification models of all 13 features
 
 def predictAllFeatures(models, X, y, results_cols):
@@ -262,7 +248,7 @@ def simulation_instance():
     for df in [heart_data_df, heart_info_df]: df.drop(columns=['class'], inplace=True)
     
     discrete_cols, continuous_cols = getColDataTypes(data_df=heart_data_df, discrete_info_df=heart_info_df)
-    print(discrete_cols, continuous_cols)
+    # print(discrete_cols, continuous_cols)
     heart_data_continuous_df = heart_data_df[continuous_cols]
     heart_data_discrete_df = heart_data_df[discrete_cols]
     
