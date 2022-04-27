@@ -1,5 +1,6 @@
 from ctypes import sizeof
 import traceback
+from matplotlib.pyplot import axis
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -57,24 +58,22 @@ def getRegressionModelType(reg_model_type, **kwargs):
     if reg_model_type == "ann": return MLPRegressor(solver='adam', alpha=1e-5, hidden_layer_sizes=(10, 10), random_state=1, max_iter=100000, **kwargs)
 
 def getSampleData(data_df):
-    # n = 12500
-    # training: 10000
-    # testing: 2500
+    # n = 62,500
+    # training: 50,000
+    # testing: 12,500
     return data_df.sample(n=62500, random_state=random.randint(a=0, b=2e9))
 
 def main():
-    final_results_df = pd.DataFrame(columns=['model_type', 'model', 'accuracy', 'class_gen_model', 'reg_gen_model'])
-    current_date_time = datetime.now().strftime('%Y%m%d-%H%M%S')
-    for _ in tqdm(range(1000)):
-        sim_results_df = simulation_instance()
-        # reorder columns
-        final_results_df = pd.concat([final_results_df, sim_results_df], axis=0)
-        final_results_df = final_results_df[['class_gen_model', 'reg_gen_model', 'model', 'accuracy']].convert_dtypes()
-        final_results_df.to_csv('results/results_{}.csv'.format(current_date_time))      
-    final_results_df = final_results_df.groupby(['model', 'class_gen_model', 'reg_gen_model'])['accuracy'].mean()
-    final_results_df.to_csv('results/results_{}.csv'.format(current_date_time))      
-    print()
-    print(final_results_df)
+    # run_simulation(5)
+    
+    data_collected_1_df = pd.read_csv('data/data_collection_1.csv', index_col=['ID'])
+    data_collected_1_df.drop(columns=['chest'], inplace=True)
+    
+    data_collected_2_df = pd.read_csv('data/data_collection_2.csv', index_col=['ID'])
+    data_collected_2_df.drop(columns=['chest'], inplace=True)
+    
+    data_prediction([data_collected_1_df, data_collected_2_df])
+    
     
 def modelFit(model, X, y):  
     try:
@@ -85,7 +84,7 @@ def modelFit(model, X, y):
     except Exception:
         print(traceback.print_exc)
         # print("Fitting model using ravel()...")
-        print(y.ravel())
+        # print(y.ravel())
         model.fit(X, y.ravel())
 
 def fitClassificationFeatures(X, y):
@@ -240,7 +239,7 @@ def predictAllFeatures(models, X, y, results_cols):
     
     return results_df
 
-def simulation_instance():
+def data_prediction(data_collected_dfs):
     heart_data_df = getSampleData(getHeartData())
     heart_label_df = pd.DataFrame(heart_data_df['class'])
     heart_info_df = getHeartInfo()
@@ -248,7 +247,7 @@ def simulation_instance():
     for df in [heart_data_df, heart_info_df]: df.drop(columns=['class'], inplace=True)
     
     discrete_cols, continuous_cols = getColDataTypes(data_df=heart_data_df, discrete_info_df=heart_info_df)
-    # print(discrete_cols, continuous_cols)
+   
     heart_data_continuous_df = heart_data_df[continuous_cols]
     heart_data_discrete_df = heart_data_df[discrete_cols]
     
@@ -281,7 +280,194 @@ def simulation_instance():
     heart_gen_test_df = X_heart_test_df.drop(columns=edge_cols)
 
     discrete_cols, continuous_cols = getColDataTypes(data_df=heart_gen_test_df, discrete_info_df=heart_info_df)
+    y = heart_gen_train_df[discrete_cols]
         
+    # combine dataframes
+    data_collected_df = pd.concat(data_collected_dfs, axis=0)
+        
+    # generates discrete features using classification models
+    models_class_feat_gen, y = fitClassificationFeatures(X=heart_edge_train_df, y=y)
+    heart_gen_class_cols = predictClassificationFeatures(models=models_class_feat_gen, X=heart_edge_test_df, y=heart_gen_test_df[discrete_cols], discrete_cols=discrete_cols, results_cols=['model_type', 'model', 'accuracy'])
+    
+    arrays = [['', '', '', '', '', '', '', ''], edge_cols]
+    tuples = list(zip(*arrays))
+    multi_index = pd.MultiIndex.from_tuples(tuples, names=["model_name", "predicted_cols"])
+    
+    results_df = data_collected_df
+        
+    results_df.columns = multi_index
+    class_gen_cols = []
+    
+    model_data_type = 'classification'
+    model_names = ['svm', 'random_forest', 'ann']
+    for i in range(len(model_names)):
+        model_name = model_names[i]
+        model = models_class_feat_gen[i]
+        y = heart_gen_test_df[discrete_cols]
+        arrays = [[model_names[i], model_names[i], model_names[i]], discrete_cols]
+        tuples = list(zip(*arrays))
+        multi_index = pd.MultiIndex.from_tuples(tuples, names=["model_name", "predicted_cols"])
+        y_cols = pd.get_dummies(y, columns=y.columns, prefix=y.columns).columns \
+            if model_name=='svm' or model_name=='random_forest' else y.columns
+        y_prime_class_df = pd.DataFrame(model.predict(data_collected_df), columns=y_cols, index=data_collected_df.index)        
+        
+        if model_name=='svm' or model_name=='random_forest': # binary
+            for y_col in discrete_cols:
+                y_pred_cols = [y_pred_col for y_pred_col in y_prime_class_df.columns if y_pred_col.startswith(y_col+"_")]
+                y_pred_cols_df = y_prime_class_df[y_pred_cols]
+                y_pred_cols_df.columns = [y_pred_col.split(y_col+"_", 1)[1] for y_pred_col in y_pred_cols]
+                y_prime_class_df[y_col] = y_pred_cols_df[y_pred_cols_df.columns].idxmax(axis=1)
+                y_prime_class_df.drop(columns=y_pred_cols, inplace=True) 
+        
+        class_gen_cols.append(y_prime_class_df)
+        y_prime_class_df.columns = multi_index
+        results_df = pd.concat([results_df, y_prime_class_df], axis=1)
+
+    results_df = pd.DataFrame(results_df, index=results_df.index, columns=pd.MultiIndex.from_tuples(results_df.columns))
+    # print(results_df)
+    results_df.to_csv('results/gen_class_cols.csv')
+
+    # generates continuous features using regression models
+    models_reg_feat_gen = fitRegressionFeatures(X=heart_edge_train_df, y=heart_gen_train_df[continuous_cols])
+    heart_gen_reg_cols = predictRegressionFeatures(models=models_reg_feat_gen, X=heart_edge_test_df, y=heart_gen_test_df[continuous_cols], results_cols=['model_type', 'model', 'MSE'])
+    
+    arrays = [['', '', '', '', '', '', '', ''], edge_cols]
+    tuples = list(zip(*arrays))
+    multi_index = pd.MultiIndex.from_tuples(tuples, names=["model_name", "predicted_cols"])
+    
+    results_df = data_collected_df
+    
+    reg_gen_cols = []
+    
+    model_data_type = 'regression'
+    model_names = ['ridge', 'random_forest', 'svr', 'ann']
+    for i in range(len(model_names)):
+        model_name = model_names[i]
+        arrays = [[model_names[i]]*len(continuous_cols), continuous_cols]
+        tuples = list(zip(*arrays))
+        multi_index = pd.MultiIndex.from_tuples(tuples, names=["model_name", "predicted_cols"])
+        model = models_reg_feat_gen[i]
+        y_prime_reg_df = pd.DataFrame(model.predict(data_collected_df))
+        y_prime_reg_df.columns = multi_index
+        results_df = pd.concat([results_df, y_prime_reg_df], axis=1)
+        
+        # print(model_data_type, model_name)
+        reg_gen_cols.append(y_prime_class_df)
+        
+    results_df = pd.DataFrame(results_df, index=results_df.index, columns=pd.MultiIndex.from_tuples(results_df.columns))
+    results_df.index.name = 'ID'
+    results_df.to_csv('results/gen_reg_cols.csv')
+
+    # predict all 13 features using edge features combined with generated columns from above
+    results_df = pd.DataFrame()
+    
+    for c in range(len(heart_gen_class_cols)):
+        for r in range(len(heart_gen_reg_cols)):
+            class_models = ['svm', 'random_forest', 'ann']
+            reg_models = ['ridge', 'random_forest', 'svr', 'ann']            
+            X_heart_test_prime_df = pd.concat([data_collected_df, class_gen_cols[c], reg_gen_cols[r]], axis=1)
+    
+            # all 13 features
+            model_data_type ='classification'
+            # print("Predicting", model_data_type, "models...")
+            model_names = ['svm', 'random_forest', 'ann']
+            for i in range(len(model_names)):
+                model_name = model_names[i]
+                
+                arrays = [([model_names[i]], [class_models[c]], [reg_models[r]])]
+                tuples = [(model_names[i], class_models[c], reg_models[r])]
+                multi_index = pd.MultiIndex.from_tuples(tuples, names=["all_feat_model", "gen_class_model", "gen_reg_model"])
+                model = models_all_feat[i]
+                y_prime_df = pd.DataFrame(model.predict(X_heart_test_prime_df), index=data_collected_df.index, columns=[(model_names[i], class_models[c], reg_models[r])])
+                # print(y_prime_df)
+
+                results_df = pd.concat([results_df, y_prime_df], axis=1)
+                
+        # print(results_df)
+        results_df.to_csv('results/predicted_results_collected.csv')
+    
+def run_simulation(num_runs):
+    final_results_df = pd.DataFrame(columns=['model_type', 'model', 'accuracy', 'class_gen_model', 'reg_gen_model'])
+    current_date_time = datetime.now().strftime('%Y%m%d-%H%M%S')
+    final_results_file_name = 'results/results_{}.csv'.format(current_date_time)
+    for _ in tqdm(range(num_runs)):
+        sim_results_df = simulation_instance()
+        final_results_df = pd.concat([final_results_df, sim_results_df], axis=0) # reorder columns
+        final_results_df = final_results_df[['class_gen_model', 'reg_gen_model', 'model', 'accuracy']].convert_dtypes()
+        final_results_df.to_csv(final_results_file_name)      
+    # final_results_df = final_results_df.groupby(['model', 'class_gen_model', 'reg_gen_model'])['accuracy'].mean()
+    # final_results_df.to_csv('results/results_{}.csv'.format(current_date_time)) 
+    print()
+    print(final_results_df)
+    
+    simulation_summary(final_results_file_name, current_date_time)
+    
+def simulation_summary(final_results_file_name, current_date_time):
+    simulation_results_df = pd.read_csv(final_results_file_name)
+    simulation_results_df.columns = ['idx', 'model', 'class_gen_model', 'reg_gen_model', 'accuracy']
+    simulation_results_df = simulation_results_df[['model', 'class_gen_model', 'reg_gen_model', 'accuracy']]
+    # print(simulation_results_df)
+    
+    simulation_results_avg = simulation_results_df.groupby(['model', 'class_gen_model', 'reg_gen_model'])['accuracy'].mean()
+    simulation_results_avg_df = pd.DataFrame(simulation_results_avg.values, columns=['avg_accuracy'], index=simulation_results_avg.index)
+    # print(simulation_results_avg_df)
+    
+    simulation_results_max = simulation_results_df.groupby(['model', 'class_gen_model', 'reg_gen_model'])['accuracy'].max()
+    simulation_results_max_df = pd.DataFrame(simulation_results_max.values, columns=['max_accuracy'], index=simulation_results_max.index)
+    # print(simulation_results_max_df)
+    
+    simulation_results_min = simulation_results_df.groupby(['model', 'class_gen_model', 'reg_gen_model'])['accuracy'].min()
+    simulation_results_min_df = pd.DataFrame(simulation_results_min.values, columns=['min_accuracy'], index=simulation_results_min.index)
+    # print(simulation_results_min_df)
+    
+    # combine average, maximum, and minimum dataframes
+    final_simulation_results_df = pd.concat([simulation_results_avg_df, simulation_results_max_df, simulation_results_min_df], axis=1)
+    print(final_simulation_results_df)
+    final_simulation_results_df.to_csv('results/simulation_results_{}.csv'.format(current_date_time))
+    
+    
+def simulation_instance():
+    heart_data_df = getSampleData(getHeartData())
+    heart_label_df = pd.DataFrame(heart_data_df['class'])
+    heart_info_df = getHeartInfo()
+    
+    for df in [heart_data_df, heart_info_df]: df.drop(columns=['class'], inplace=True)
+    
+    discrete_cols, continuous_cols = getColDataTypes(data_df=heart_data_df, discrete_info_df=heart_info_df)
+   
+    heart_data_continuous_df = heart_data_df[continuous_cols]
+    heart_data_discrete_df = heart_data_df[discrete_cols]
+    
+    # normalizes continuous features
+    heart_data_continuous_df = (heart_data_continuous_df-heart_data_continuous_df.min())/(heart_data_continuous_df.max()-heart_data_continuous_df.min())
+
+    # recombines normalized continuous features with regression features    
+    heart_data_df = pd.concat([heart_data_continuous_df, heart_data_discrete_df], axis=1)   
+    
+    # splits data into training and testing dataframes
+    X_heart_train_df, X_heart_test_df, y_heart_train_df, y_heart_test_df = train_test_split(heart_data_df, heart_label_df, test_size = 0.2, random_state=random.randint(a=0, b=2e9), shuffle=True)
+        
+    # fits on training data and all 13 features
+    models_all_feat = fitAllFeatures(X=X_heart_train_df, y=y_heart_train_df)
+        
+    edge_cols = ['age', 
+                 'sex', 
+                 'resting_blood_pressure', 
+                 'fasting_blood_sugar', 
+                 'resting_electrocardiographic_results', 
+                 'maximum_heart_rate_achieved', 
+                 'exercise_induced_angina']
+    
+    # edge data collection
+    heart_edge_train_df = getEdgeData(data_df=X_heart_train_df, cols=edge_cols)
+    heart_edge_test_df = getEdgeData(data_df=X_heart_test_df, cols=edge_cols)
+    
+    # expected generated columns
+    heart_gen_train_df = X_heart_train_df.drop(columns=edge_cols)
+    heart_gen_test_df = X_heart_test_df.drop(columns=edge_cols)
+
+    discrete_cols, continuous_cols = getColDataTypes(data_df=heart_gen_test_df, discrete_info_df=heart_info_df)
+    
     y = heart_gen_train_df[discrete_cols]
     
     # generates discrete features using classification models
@@ -310,8 +496,9 @@ def simulation_instance():
             results_df.columns = ['model_type', 'model', 'accuracy', 'class_gen_model', 'reg_gen_model']
             
             simulation_result_df = pd.concat([simulation_result_df, results_df], axis=0)
+    
     return simulation_result_df
-
+    
 if __name__ == '__main__':
     print("Running main...")
     main()
